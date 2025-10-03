@@ -13,9 +13,9 @@
 
     <div class="mb-3">
       <div>Token price (USD): <strong>{{ TOKEN_PRICE_USD }}</strong></div>
-      <div>USD total: <strong>\${{ formatNumber(usdTotal, 6) }}</strong></div>
+      <div>USD total: <strong>${{ formatNumber(usdTotal, 6) }}</strong></div>
       <div>
-        SOL price: <strong v-if="solPrice !== null">\${{ formatNumber(solPrice, 6) }}</strong>
+        SOL price: <strong v-if="solPrice !== null">${{ formatNumber(solPrice, 6) }}</strong>
         <span v-else>loading...</span>
       </div>
       <div v-if="solPrice !== null">Estimated SOL required: <strong>{{ formatNumber(requiredSOL, 6) }} SOL</strong></div>
@@ -58,11 +58,11 @@ import {
   Transaction
 } from '@solana/web3.js';
 
-const TOKEN_PRICE_USD = Number(import.meta.env.VITE_TOKEN_PRICE_USD || 0.00034);
+const TOKEN_PRICE_USD = Number(import.meta.env.VITE_TOKEN_PRICE_USD || 0.00001);
 const TOKEN_DECIMALS = Number(import.meta.env.VITE_TOKEN_DECIMALS || 6);
 const TOKEN_MINT_ADDRESS = import.meta.env.VITE_TOKEN_MINT_ADDRESS;
 const TREASURY_SOL_ADDRESS = import.meta.env.VITE_TREASURY_SOL_ADDRESS;
-const MIN_TOKENS = Number(import.meta.env.VITE_MIN_TOKENS || 100000);
+const MIN_TOKENS = Number(import.meta.env.VITE_MIN_TOKENS || 1000);
 const RPC_URL = import.meta.env.VITE_RPC_URL;
 
 const connection = new Connection(RPC_URL, 'confirmed');
