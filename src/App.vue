@@ -1,7 +1,7 @@
 <script setup>
 import { WalletProvider } from "@solana/wallet-adapter-vue";
 import { WalletModalProvider } from "@solana/wallet-adapter-vue-ui";
-import { PhantomWalletAdapter, TorusWalletAdapter } from "@solana/wallet-adapter-wallets";
+import { PhantomWalletAdapter, SolflareWalletAdapter, TorusWalletAdapter } from "@solana/wallet-adapter-wallets";
 
 import Presale from "./pages/Presale.vue";
 
@@ -9,7 +9,7 @@ import Presale from "./pages/Presale.vue";
 const endpoint = "https://api.mainnet-beta.solana.com";
 
 // Wallet adapters
-const wallets = [new PhantomWalletAdapter(), new TorusWalletAdapter()];
+const wallets = [new PhantomWalletAdapter(), new SolflareWalletAdapter(), new TorusWalletAdapter()];
 </script>
 
 <template>
