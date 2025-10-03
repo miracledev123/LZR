@@ -25,31 +25,12 @@
       </div>
     </div>
 
+    <!-- Wallet adapter connect/disconnect button -->
     <div class="flex gap-2 mb-3">
-      <button
-        @click="connectWallet"
-        class="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded disabled:opacity-50"
-        :disabled="isConnecting"
-      >
-        <!-- Solana icon -->
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 397 311" fill="currentColor">
-          <linearGradient id="solana-gradient" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stop-color="#00FFA3"/>
-            <stop offset="100%" stop-color="#DC1FFF"/>
-          </linearGradient>
-          <path fill="url(#solana-gradient)" d="M64 236a9 9 0 0 1 6-3h324a6 6 0 0 1 4 10l-63 68a9 9 0 0 1-6 3H5a6 6 0 0 1-4-10l63-68Zm0-99a9 9 0 0 1 6-3h324a6 6 0 0 0 4-10l-63-68a9 9 0 0 0-6-3H5a6 6 0 0 0-4 10l63 68Zm0-99a9 9 0 0 1 6-3h324a6 6 0 0 0 4-10L335 3a9 9 0 0 0-6-3H5a6 6 0 0 0-4 10l63 68Z"/>
-        </svg>
-
-        <span v-if="walletPubKey">
-          Disconnect ({{ shortPubkey(walletPubKey) }})
-        </span>
-        <span v-else>
-          {{ isConnecting ? 'Connecting...' : 'Connect Wallet' }}
-        </span>
-      </button>
+      <WalletMultiButton class="px-4 py-2 bg-indigo-600 text-white rounded" />
 
       <button
-        v-if="walletPubKey && canShowBuyButton"
+        v-if="publicKey && canShowBuyButton"
         @click="buy"
         class="px-4 py-2 bg-green-600 text-white rounded"
         :disabled="buyInProgress"
@@ -66,7 +47,8 @@
         {{ message }}
       </div>
       <div v-if="walletBalanceSOL !== null" class="mt-2">
-        Wallet SOL balance: <strong>{{ formatNumber(walletBalanceSOL, 6) }} SOL</strong>
+        Wallet SOL balance:
+        <strong>{{ formatNumber(walletBalanceSOL, 6) }} SOL</strong>
       </div>
       <div v-if="txSignature" class="mt-2">
         Last SOL tx: <code class="break-all">{{ txSignature }}</code>
@@ -78,11 +60,9 @@
 <script setup>
 import { ref, computed, onMounted } from "vue";
 import { Connection, PublicKey, Transaction, LAMPORTS_PER_SOL } from "@solana/web3.js";
+import { useWallet, WalletMultiButton } from "@solana/wallet-adapter-vue";
 
 const TOKEN_PRICE_USD = Number(import.meta.env.VITE_TOKEN_PRICE_USD || 0.00001);
-const TOKEN_DECIMALS = Number(import.meta.env.VITE_TOKEN_DECIMALS || 6);
-const TOKEN_MINT_ADDRESS = import.meta.env.VITE_TOKEN_MINT_ADDRESS;
-const TREASURY_SOL_ADDRESS = import.meta.env.VITE_TREASURY_SOL_ADDRESS;
 const MIN_TOKENS = Number(import.meta.env.VITE_MIN_TOKENS || 1000);
 const RPC_URL = import.meta.env.VITE_RPC_URL;
 
@@ -90,9 +70,7 @@ const connection = new Connection(RPC_URL, "confirmed");
 
 const tokenCount = ref("");
 const solPrice = ref(null);
-const walletPubKey = ref(null);
 const walletBalanceSOL = ref(null);
-const isConnecting = ref(false);
 const buyInProgress = ref(false);
 const message = ref("");
 const txSignature = ref(null);
@@ -100,14 +78,12 @@ const txSignature = ref(null);
 const usdTotal = computed(() => (Number(tokenCount.value) || 0) * TOKEN_PRICE_USD);
 const requiredSOL = computed(() => solPrice.value ? (usdTotal.value / solPrice.value) : 0);
 
+// Wallet hook
+const { publicKey, signTransaction } = useWallet();
+
 function formatNumber(v, decimals = 4) {
   if (v === null || v === undefined || Number.isNaN(v)) return "-";
   return Number(v).toLocaleString(undefined, { maximumFractionDigits: decimals });
-}
-
-function shortPubkey(pk) {
-  if (!pk) return "";
-  return pk.slice(0, 4) + "..." + pk.slice(-4);
 }
 
 async function fetchSolPrice() {
@@ -125,62 +101,13 @@ async function fetchSolPrice() {
 onMounted(() => {
   fetchSolPrice();
   setInterval(fetchSolPrice, 30000);
+  if (publicKey.value) checkBalance();
 });
 
-// Wallet connect/disconnect toggle
-async function connectWallet() {
-  // Disconnect if already connected
-  if (walletPubKey.value) {
-    try {
-      if (window.solana?.disconnect) {
-        await window.solana.disconnect();
-      } else if (window.solflare?.disconnect) {
-        await window.solflare.disconnect();
-      }
-    } catch (e) {
-      console.warn("Wallet disconnect error:", e);
-    }
-    walletPubKey.value = null;
-    walletBalanceSOL.value = null;
-    txSignature.value = null;
-    message.value = "";
-    return;
-  }
-
-  // Otherwise connect
-  isConnecting.value = true;
-  message.value = "";
-  const desired = Number(tokenCount.value) || 0;
-  if (desired < MIN_TOKENS) {
-    alert(`Minimum is ${MIN_TOKENS} $LZR`);
-    isConnecting.value = false;
-    return;
-  }
-
-  try {
-    if (window.solana?.isPhantom) {
-      const resp = await window.solana.connect();
-      walletPubKey.value = resp.publicKey.toString();
-    } else if (window.solflare?.isSolflare) {
-      await window.solflare.connect();
-      walletPubKey.value = window.solflare.publicKey.toString();
-    } else {
-      message.value = "No supported wallet found. Install Phantom or Solflare.";
-      return;
-    }
-
-    await checkBalance();
-  } catch (e) {
-    console.error(e);
-    message.value = "Wallet connection failed.";
-  } finally {
-    isConnecting.value = false;
-  }
-}
-
 async function checkBalance() {
+  if (!publicKey.value) return;
   try {
-    const lamports = await connection.getBalance(new PublicKey(walletPubKey.value));
+    const lamports = await connection.getBalance(new PublicKey(publicKey.value.toString()));
     walletBalanceSOL.value = lamports / LAMPORTS_PER_SOL;
   } catch (e) {
     console.error(e);
@@ -188,12 +115,18 @@ async function checkBalance() {
   }
 }
 
-// Buy function stays the same...
 async function buy() {
-  if (!walletPubKey.value) {
+  if (!publicKey.value) {
     message.value = "Connect wallet first.";
     return;
   }
+
+  const desired = Number(tokenCount.value) || 0;
+  if (desired < MIN_TOKENS) {
+    alert(`Minimum is ${MIN_TOKENS} $LZR`);
+    return;
+  }
+
   buyInProgress.value = true;
   message.value = "Requesting partially-signed transaction...";
 
@@ -204,9 +137,8 @@ async function buy() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        buyer: walletPubKey.value,
-        tokenAmount: Number(tokenCount.value),
-        solTxSignature: null,
+        buyer: publicKey.value.toString(),
+        tokenAmount: desired,
         expectedLamports: lamportsNeeded
       })
     });
@@ -219,20 +151,13 @@ async function buy() {
     }
 
     const tx = Transaction.from(Buffer.from(payload.tx, "base64"));
-    tx.feePayer = new PublicKey(walletPubKey.value);
+    tx.feePayer = new PublicKey(publicKey.value.toString());
     tx.recentBlockhash = (await connection.getRecentBlockhash()).blockhash;
 
-    let signedTx;
-    if (window.solana?.signTransaction) {
-      signedTx = await window.solana.signTransaction(tx);
-    } else if (window.solflare?.signTransaction) {
-      signedTx = await window.solflare.signTransaction(tx);
-    } else {
-      throw new Error("Wallet cannot sign transaction from this page.");
-    }
-
-    const sig = await connection.sendRawTransaction(signedTx.serialize());
+    const signed = await signTransaction.value(tx);
+    const sig = await connection.sendRawTransaction(signed.serialize());
     await connection.confirmTransaction(sig, "confirmed");
+
     txSignature.value = sig;
     message.value = `✅ Purchase complete! Tx: https://explorer.solana.com/tx/${sig}?cluster=mainnet-beta`;
   } catch (e) {
@@ -240,10 +165,11 @@ async function buy() {
     message.value = "Purchase failed: " + (e.message || String(e));
   } finally {
     buyInProgress.value = false;
-    if (walletPubKey.value) checkBalance();
+    if (publicKey.value) checkBalance();
   }
 }
 </script>
+
 
 
 <style scoped>
