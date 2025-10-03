@@ -28,7 +28,7 @@
         :disabled="isConnecting"
       >
         <span v-if="walletPubKey">
-          {{ shortPubkey(walletPubKey) }}
+          Disconnect ({{ shortPubkey(walletPubKey) }})
         </span>
         <span v-else>
           {{ isConnecting ? 'Connecting...' : 'Connect Wallet' }}
@@ -52,7 +52,6 @@
     </div>
   </div>
 </template>
-
 
 <script setup>
 import { ref, computed, onMounted } from "vue";
@@ -106,8 +105,27 @@ onMounted(() => {
   setInterval(fetchSolPrice, 30000);
 });
 
-// Wallet connection
+// Wallet connect/disconnect toggle
 async function connectWallet() {
+  // Disconnect if already connected
+  if (walletPubKey.value) {
+    try {
+      if (window.solana?.disconnect) {
+        await window.solana.disconnect();
+      } else if (window.solflare?.disconnect) {
+        await window.solflare.disconnect();
+      }
+    } catch (e) {
+      console.warn("Wallet disconnect error:", e);
+    }
+    walletPubKey.value = null;
+    walletBalanceSOL.value = null;
+    txSignature.value = null;
+    message.value = "";
+    return;
+  }
+
+  // Otherwise connect
   isConnecting.value = true;
   message.value = "";
   const desired = Number(tokenCount.value) || 0;
@@ -148,7 +166,7 @@ async function checkBalance() {
   }
 }
 
-// New presale buy function using partially-signed tx
+// Buy function stays the same...
 async function buy() {
   if (!walletPubKey.value) {
     message.value = "Connect wallet first.";
@@ -160,14 +178,13 @@ async function buy() {
   try {
     const lamportsNeeded = Math.ceil(requiredSOL.value * LAMPORTS_PER_SOL);
 
-    // Request backend to prepare partially-signed tx
     const res = await fetch("/.netlify/functions/transferTokens", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         buyer: walletPubKey.value,
         tokenAmount: Number(tokenCount.value),
-        solTxSignature: null, // can be handled in backend if payment is needed
+        solTxSignature: null,
         expectedLamports: lamportsNeeded
       })
     });
@@ -179,12 +196,10 @@ async function buy() {
       return;
     }
 
-    // Deserialize partially-signed tx
     const tx = Transaction.from(Buffer.from(payload.tx, "base64"));
     tx.feePayer = new PublicKey(walletPubKey.value);
     tx.recentBlockhash = (await connection.getRecentBlockhash()).blockhash;
 
-    // Let wallet sign
     let signedTx;
     if (window.solana?.signTransaction) {
       signedTx = await window.solana.signTransaction(tx);
@@ -194,7 +209,6 @@ async function buy() {
       throw new Error("Wallet cannot sign transaction from this page.");
     }
 
-    // Send transaction
     const sig = await connection.sendRawTransaction(signedTx.serialize());
     await connection.confirmTransaction(sig, "confirmed");
     txSignature.value = sig;
