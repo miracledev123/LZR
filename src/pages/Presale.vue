@@ -60,7 +60,8 @@
 <script setup>
 import { ref, computed, onMounted } from "vue";
 import { Connection, PublicKey, Transaction, LAMPORTS_PER_SOL } from "@solana/web3.js";
-import { useWallet, WalletMultiButton } from "@solana/wallet-adapter-vue";
+import { useWallet } from "@solana/wallet-adapter-vue";
+import { WalletMultiButton } from "@solana/wallet-adapter-vue-ui";
 
 const TOKEN_PRICE_USD = Number(import.meta.env.VITE_TOKEN_PRICE_USD || 0.00001);
 const MIN_TOKENS = Number(import.meta.env.VITE_MIN_TOKENS || 1000);

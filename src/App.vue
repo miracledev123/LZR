@@ -1,33 +1,22 @@
 <script setup>
 import { WalletProvider } from "@solana/wallet-adapter-vue";
 import { WalletModalProvider } from "@solana/wallet-adapter-vue-ui";
-import {
-  PhantomWalletAdapter,
-  SolflareWalletAdapter,
-  TorusWalletAdapter,
-} from "@solana/wallet-adapter-wallets";
-import { ConnectionProvider } from "@solana/wallet-adapter-vue";
+import { PhantomWalletAdapter, TorusWalletAdapter } from "@solana/wallet-adapter-wallets";
 
-const endpoint = import.meta.env.VITE_RPC_URL || "https://api.mainnet-beta.solana.com";
-const wallets = [
-  new PhantomWalletAdapter(),
-  new SolflareWalletAdapter(),
-  new TorusWalletAdapter(),
-];
+import Presale from "./pages/Presale.vue";
+
+// Solana RPC endpoint
+const endpoint = "https://api.mainnet-beta.solana.com";
+
+// Wallet adapters
+const wallets = [new PhantomWalletAdapter(), new TorusWalletAdapter()];
 </script>
 
 <template>
-  <ConnectionProvider :endpoint="endpoint">
-    <WalletProvider :wallets="wallets" autoConnect>
-      <WalletModalProvider>
-        <!-- Your presale page -->
-        <Presale />
-      </WalletModalProvider>
-    </WalletProvider>
-  </ConnectionProvider>
+  <!-- Removed ConnectionProvider -->
+  <WalletProvider :wallets="wallets" autoConnect>
+    <WalletModalProvider>
+      <Presale />
+    </WalletModalProvider>
+  </WalletProvider>
 </template>
-
-<script>
-import Presale from "./pages/Presale.vue";
-export default { components: { Presale } };
-</script>
