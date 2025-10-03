@@ -50,13 +50,7 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue';
-import {
-  Connection,
-  PublicKey,
-  LAMPORTS_PER_SOL,
-  SystemProgram,
-  Transaction
-} from '@solana/web3.js';
+import { Connection, PublicKey, LAMPORTS_PER_SOL, SystemProgram, Transaction } from '@solana/web3.js';
 
 const TOKEN_PRICE_USD = Number(import.meta.env.VITE_TOKEN_PRICE_USD || 0.00001);
 const TOKEN_DECIMALS = Number(import.meta.env.VITE_TOKEN_DECIMALS || 6);
@@ -77,19 +71,12 @@ const buyInProgress = ref(false);
 const message = ref('');
 const txSignature = ref(null);
 
-const usdTotal = computed(() => {
-  const n = Number(tokenCount.value) || 0;
-  return n * TOKEN_PRICE_USD;
-});
-const requiredSOL = computed(() => {
-  return solPrice.value ? (usdTotal.value / solPrice.value) : 0;
-});
+const usdTotal = computed(() => (Number(tokenCount.value) || 0) * TOKEN_PRICE_USD);
+const requiredSOL = computed(() => solPrice.value ? (usdTotal.value / solPrice.value) : 0);
 
 const canShowBuyButton = computed(() => {
-  // show buy if wallet connected and has enough balance
-  if (!walletPubKey.value) return false;
-  if (walletBalanceSOL.value === null) return false;
-  const buffer = 0.005; // small buffer for fees
+  if (!walletPubKey.value || walletBalanceSOL.value === null) return false;
+  const buffer = 0.01; // include small fee buffer
   return walletBalanceSOL.value >= (requiredSOL.value + buffer);
 });
 
@@ -120,7 +107,7 @@ async function fetchSolPrice() {
 
 onMounted(() => {
   fetchSolPrice();
-  setInterval(fetchSolPrice, 30000); // refresh every 30s
+  setInterval(fetchSolPrice, 30000);
 });
 
 async function connectWallet() {
@@ -135,7 +122,6 @@ async function connectWallet() {
   }
 
   try {
-    // Phantom
     if (window.solana && window.solana.isPhantom) {
       const resp = await window.solana.connect();
       walletPubKey.value = resp.publicKey.toString();
@@ -148,7 +134,6 @@ async function connectWallet() {
       return;
     }
 
-    // check balance
     await checkBalance();
   } catch (e) {
     console.error(e);
@@ -163,10 +148,10 @@ async function checkBalance() {
     const pk = new PublicKey(walletPubKey.value);
     const lamports = await connection.getBalance(pk);
     walletBalanceSOL.value = lamports / LAMPORTS_PER_SOL;
-    const required = requiredSOL.value || 0;
-    const buffer = 0.005;
-    if ((walletBalanceSOL.value + 1e-12) < (required + buffer)) {
-      message.value = `Insufficient SOL. Need ≈ ${formatNumber(required + buffer, 6)} SOL but have ${formatNumber(walletBalanceSOL.value, 6)} SOL.`;
+
+    const buffer = 0.01;
+    if ((walletBalanceSOL.value + 1e-12) < (requiredSOL.value + buffer)) {
+      message.value = `Insufficient SOL. Need ≈ ${formatNumber(requiredSOL.value + buffer, 6)} SOL but have ${formatNumber(walletBalanceSOL.value, 6)} SOL.`;
     } else {
       message.value = `Sufficient balance. Click Buy to proceed.`;
     }
@@ -185,7 +170,7 @@ async function buy() {
   message.value = 'Creating SOL payment transaction...';
 
   try {
-    const lamportsNeeded = Math.ceil(requiredSOL.value * LAMPORTS_PER_SOL); // round up
+    const lamportsNeeded = Math.ceil(requiredSOL.value * LAMPORTS_PER_SOL);
     const from = new PublicKey(walletPubKey.value);
     const to = new PublicKey(TREASURY_SOL_ADDRESS);
 
@@ -202,13 +187,11 @@ async function buy() {
 
     let signature = null;
 
-    // Phantom: use signAndSendTransaction if available
     if (window.solana && window.solana.signAndSendTransaction) {
       const { signature: sig } = await window.solana.signAndSendTransaction(tx);
       signature = sig;
       await connection.confirmTransaction(signature, 'confirmed');
     } else if (window.solana && window.solana.signTransaction) {
-      // fallback
       const signed = await window.solana.signTransaction(tx);
       signature = await connection.sendRawTransaction(signed.serialize());
       await connection.confirmTransaction(signature, 'confirmed');
@@ -223,7 +206,7 @@ async function buy() {
     txSignature.value = signature;
     message.value = `SOL sent (sig ${signature}). Requesting token delivery...`;
 
-    // call server to request token transfer
+    // Send tokenAmount raw, backend handles decimals
     const resp = await fetch('/.netlify/functions/transferTokens', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -234,12 +217,14 @@ async function buy() {
         expectedLamports: lamportsNeeded
       })
     });
+
     const json = await resp.json();
     if (resp.ok) {
-      message.value = `Token transfer succeeded. Token transfer tx: ${json.signature}`;
+      message.value = `Token transfer succeeded! Token tx: ${json.signature}`;
     } else {
       message.value = `Token transfer failed: ${json.error ?? JSON.stringify(json)}`;
     }
+
   } catch (e) {
     console.error(e);
     message.value = `Purchase failed: ${e.message || e}`;
