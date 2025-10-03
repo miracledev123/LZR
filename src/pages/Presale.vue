@@ -49,8 +49,8 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue';
-import { Connection, PublicKey, LAMPORTS_PER_SOL, SystemProgram, Transaction } from '@solana/web3.js';
+import { ref, computed, onMounted } from "vue";
+import { Connection, PublicKey, Transaction, LAMPORTS_PER_SOL } from "@solana/web3.js";
 
 const TOKEN_PRICE_USD = Number(import.meta.env.VITE_TOKEN_PRICE_USD || 0.00001);
 const TOKEN_DECIMALS = Number(import.meta.env.VITE_TOKEN_DECIMALS || 6);
@@ -59,49 +59,39 @@ const TREASURY_SOL_ADDRESS = import.meta.env.VITE_TREASURY_SOL_ADDRESS;
 const MIN_TOKENS = Number(import.meta.env.VITE_MIN_TOKENS || 1000);
 const RPC_URL = import.meta.env.VITE_RPC_URL;
 
-const connection = new Connection(RPC_URL, 'confirmed');
+const connection = new Connection(RPC_URL, "confirmed");
 
-const tokenCount = ref('');
+const tokenCount = ref("");
 const solPrice = ref(null);
-const solPriceLoading = ref(false);
 const walletPubKey = ref(null);
 const walletBalanceSOL = ref(null);
 const isConnecting = ref(false);
 const buyInProgress = ref(false);
-const message = ref('');
+const message = ref("");
 const txSignature = ref(null);
 
 const usdTotal = computed(() => (Number(tokenCount.value) || 0) * TOKEN_PRICE_USD);
 const requiredSOL = computed(() => solPrice.value ? (usdTotal.value / solPrice.value) : 0);
 
-const canShowBuyButton = computed(() => {
-  if (!walletPubKey.value || walletBalanceSOL.value === null) return false;
-  const buffer = 0.01; // include small fee buffer
-  return walletBalanceSOL.value >= (requiredSOL.value + buffer);
-});
-
 function formatNumber(v, decimals = 4) {
-  if (v === null || v === undefined || Number.isNaN(v)) return '-';
+  if (v === null || v === undefined || Number.isNaN(v)) return "-";
   return Number(v).toLocaleString(undefined, { maximumFractionDigits: decimals });
 }
 
 function shortPubkey(pk) {
-  if (!pk) return '';
-  return pk.slice(0, 4) + '...' + pk.slice(-4);
+  if (!pk) return "";
+  return pk.slice(0, 4) + "..." + pk.slice(-4);
 }
 
 async function fetchSolPrice() {
-  solPriceLoading.value = true;
   try {
-    const res = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd');
+    const res = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd");
     const data = await res.json();
     solPrice.value = data?.solana?.usd ?? null;
   } catch (e) {
     console.error(e);
     solPrice.value = null;
-    message.value = 'Could not fetch SOL price from Coingecko.';
-  } finally {
-    solPriceLoading.value = false;
+    message.value = "Could not fetch SOL price.";
   }
 }
 
@@ -110,10 +100,10 @@ onMounted(() => {
   setInterval(fetchSolPrice, 30000);
 });
 
+// Wallet connection
 async function connectWallet() {
   isConnecting.value = true;
-  message.value = '';
-
+  message.value = "";
   const desired = Number(tokenCount.value) || 0;
   if (desired < MIN_TOKENS) {
     alert(`Minimum is ${MIN_TOKENS} $LZR`);
@@ -122,22 +112,21 @@ async function connectWallet() {
   }
 
   try {
-    if (window.solana && window.solana.isPhantom) {
+    if (window.solana?.isPhantom) {
       const resp = await window.solana.connect();
       walletPubKey.value = resp.publicKey.toString();
-    } else if (window.solflare && window.solflare.isSolflare) {
+    } else if (window.solflare?.isSolflare) {
       await window.solflare.connect();
       walletPubKey.value = window.solflare.publicKey.toString();
     } else {
-      message.value = 'No supported wallet found. Install Phantom or Solflare.';
-      isConnecting.value = false;
+      message.value = "No supported wallet found. Install Phantom or Solflare.";
       return;
     }
 
     await checkBalance();
   } catch (e) {
     console.error(e);
-    message.value = 'Wallet connection failed or rejected.';
+    message.value = "Wallet connection failed.";
   } finally {
     isConnecting.value = false;
   }
@@ -145,92 +134,70 @@ async function connectWallet() {
 
 async function checkBalance() {
   try {
-    const pk = new PublicKey(walletPubKey.value);
-    const lamports = await connection.getBalance(pk);
+    const lamports = await connection.getBalance(new PublicKey(walletPubKey.value));
     walletBalanceSOL.value = lamports / LAMPORTS_PER_SOL;
-
-    const buffer = 0.01;
-    if ((walletBalanceSOL.value + 1e-12) < (requiredSOL.value + buffer)) {
-      message.value = `Insufficient SOL. Need ≈ ${formatNumber(requiredSOL.value + buffer, 6)} SOL but have ${formatNumber(walletBalanceSOL.value, 6)} SOL.`;
-    } else {
-      message.value = `Sufficient balance. Click Buy to proceed.`;
-    }
   } catch (e) {
     console.error(e);
-    message.value = 'Could not fetch wallet balance.';
+    message.value = "Failed to fetch wallet balance.";
   }
 }
 
+// New presale buy function using partially-signed tx
 async function buy() {
   if (!walletPubKey.value) {
-    message.value = 'Please connect wallet first.';
+    message.value = "Connect wallet first.";
     return;
   }
   buyInProgress.value = true;
-  message.value = 'Creating SOL payment transaction...';
+  message.value = "Requesting partially-signed transaction...";
 
   try {
     const lamportsNeeded = Math.ceil(requiredSOL.value * LAMPORTS_PER_SOL);
-    const from = new PublicKey(walletPubKey.value);
-    const to = new PublicKey(TREASURY_SOL_ADDRESS);
 
-    const tx = new Transaction().add(
-      SystemProgram.transfer({
-        fromPubkey: from,
-        toPubkey: to,
-        lamports: lamportsNeeded
-      })
-    );
-
-    tx.feePayer = from;
-    tx.recentBlockhash = (await connection.getRecentBlockhash()).blockhash;
-
-    let signature = null;
-
-    if (window.solana && window.solana.signAndSendTransaction) {
-      const { signature: sig } = await window.solana.signAndSendTransaction(tx);
-      signature = sig;
-      await connection.confirmTransaction(signature, 'confirmed');
-    } else if (window.solana && window.solana.signTransaction) {
-      const signed = await window.solana.signTransaction(tx);
-      signature = await connection.sendRawTransaction(signed.serialize());
-      await connection.confirmTransaction(signature, 'confirmed');
-    } else if (window.solflare && window.solflare.signAndSendTransaction) {
-      const { signature: sig } = await window.solflare.signAndSendTransaction(tx);
-      signature = sig;
-      await connection.confirmTransaction(signature, 'confirmed');
-    } else {
-      throw new Error('Wallet cannot sign/send transaction from this page.');
-    }
-
-    txSignature.value = signature;
-    message.value = `SOL sent (sig ${signature}). Requesting token delivery...`;
-
-    // Send tokenAmount raw, backend handles decimals
-    const resp = await fetch('/.netlify/functions/transferTokens', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+    // Request backend to prepare partially-signed tx
+    const res = await fetch("/.netlify/functions/transferTokens", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         buyer: walletPubKey.value,
         tokenAmount: Number(tokenCount.value),
-        solTxSignature: signature,
+        solTxSignature: null, // can be handled in backend if payment is needed
         expectedLamports: lamportsNeeded
       })
     });
 
-    const json = await resp.json();
-    if (resp.ok) {
-      message.value = `Token transfer succeeded! Token tx: ${json.signature}`;
-    } else {
-      message.value = `Token transfer failed: ${json.error ?? JSON.stringify(json)}`;
+    const payload = await res.json();
+    if (!res.ok) {
+      const msg = payload?.error || JSON.stringify(payload);
+      message.value = "Server error: " + msg;
+      return;
     }
 
+    // Deserialize partially-signed tx
+    const tx = Transaction.from(Buffer.from(payload.tx, "base64"));
+    tx.feePayer = new PublicKey(walletPubKey.value);
+    tx.recentBlockhash = (await connection.getRecentBlockhash()).blockhash;
+
+    // Let wallet sign
+    let signedTx;
+    if (window.solana?.signTransaction) {
+      signedTx = await window.solana.signTransaction(tx);
+    } else if (window.solflare?.signTransaction) {
+      signedTx = await window.solflare.signTransaction(tx);
+    } else {
+      throw new Error("Wallet cannot sign transaction from this page.");
+    }
+
+    // Send transaction
+    const sig = await connection.sendRawTransaction(signedTx.serialize());
+    await connection.confirmTransaction(sig, "confirmed");
+    txSignature.value = sig;
+    message.value = `✅ Purchase complete! Tx: https://explorer.solana.com/tx/${sig}?cluster=mainnet-beta`;
   } catch (e) {
     console.error(e);
-    message.value = `Purchase failed: ${e.message || e}`;
+    message.value = "Purchase failed: " + (e.message || String(e));
   } finally {
     buyInProgress.value = false;
-    // refresh wallet balance
     if (walletPubKey.value) checkBalance();
   }
 }

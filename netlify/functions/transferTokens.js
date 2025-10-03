@@ -1,96 +1,116 @@
 // netlify/functions/transferTokens.js
-const { Connection, PublicKey, Keypair, Transaction } = require('@solana/web3.js');
+const { Keypair, PublicKey, Connection, Transaction } = require("@solana/web3.js");
 const {
-  getOrCreateAssociatedTokenAccount,
+  getAssociatedTokenAddress,
+  createAssociatedTokenAccountInstruction,
   createTransferInstruction,
-  TOKEN_PROGRAM_ID
-} = require('@solana/spl-token');
+  getAccount
+} = require("@solana/spl-token");
 
 const RPC_URL = process.env.RPC_URL;
 const TOKEN_MINT_ADDRESS = process.env.TOKEN_MINT_ADDRESS;
 const TOKEN_DECIMALS = Number(process.env.TOKEN_DECIMALS || 6);
-const TREASURY_SOL_ADDRESS = process.env.TREASURY_SOL_ADDRESS; // optional duplication
-const TREASURY_PRIVATE_KEY = process.env.TREASURY_PRIVATE_KEY; // JSON array string
+const TREASURY_SOL_ADDRESS = process.env.TREASURY_SOL_ADDRESS;
+const TREASURY_PRIVATE_KEY = process.env.TREASURY_PRIVATE_KEY;
 
 if (!RPC_URL || !TREASURY_PRIVATE_KEY || !TOKEN_MINT_ADDRESS) {
-  console.error('Missing required env vars.');
+  console.error("Missing required env vars.");
 }
 
-exports.handler = async function (event) {
-  if (event.httpMethod !== 'POST') {
-    return { statusCode: 405, body: 'Method Not Allowed' };
+exports.handler = async (event) => {
+  if (event.httpMethod !== "POST") {
+    return { statusCode: 405, body: "Method Not Allowed" };
   }
 
   try {
-    const body = JSON.parse(event.body);
-    const { buyer, tokenAmount, solTxSignature, expectedLamports } = body;
+    const { buyer, tokenAmount, solTxSignature, expectedLamports } = JSON.parse(event.body || "{}");
     if (!buyer || !tokenAmount || !solTxSignature || !expectedLamports) {
-      return { statusCode: 400, body: JSON.stringify({ error: 'Missing parameters' }) };
+      return { statusCode: 400, body: JSON.stringify({ error: "Missing parameters" }) };
     }
 
-    const connection = new Connection(RPC_URL, 'confirmed');
+    const connection = new Connection(RPC_URL, "confirmed");
+    const mintPubkey = new PublicKey(TOKEN_MINT_ADDRESS);
+    const buyerPubkey = new PublicKey(buyer);
 
-    // Verify SOL transaction occurred and funds were sent to your treasury
-    const onChain = await connection.getTransaction(solTxSignature);
-    if (!onChain || !onChain.meta) {
-      return { statusCode: 400, body: JSON.stringify({ error: 'SOL transaction not found or not confirmed yet' }) };
+    // Verify SOL transaction to treasury
+    const solTx = await connection.getTransaction(solTxSignature);
+    if (!solTx || !solTx.meta) {
+      return { statusCode: 400, body: JSON.stringify({ error: "SOL transaction not found or not confirmed yet" }) };
     }
 
-    // Find treasury key within transaction account keys
-    const accountKeys = onChain.transaction.message.accountKeys.map(k => k.toString());
-    const preBalances = onChain.meta.preBalances;
-    const postBalances = onChain.meta.postBalances;
+    const keys = solTx.transaction.message.accountKeys.map(k => k.toString());
+    const preBalances = solTx.meta.preBalances;
+    const postBalances = solTx.meta.postBalances;
+    const treasuryIndex = keys.indexOf(TREASURY_SOL_ADDRESS);
 
-    const treasuryIndex = accountKeys.indexOf(process.env.TREASURY_SOL_ADDRESS);
     if (treasuryIndex === -1) {
-      return { statusCode: 400, body: JSON.stringify({ error: 'Treasury address not present in SOL transaction' }) };
+      return { statusCode: 400, body: JSON.stringify({ error: "Treasury address not in SOL tx" }) };
     }
 
     const lamportsReceived = postBalances[treasuryIndex] - preBalances[treasuryIndex];
     if (lamportsReceived < expectedLamports) {
-      return { statusCode: 400, body: JSON.stringify({ error: 'Received lamports less than expected' }) };
+      return { statusCode: 400, body: JSON.stringify({ error: "Received lamports less than expected" }) };
     }
 
-    // Prepare to send tokens from treasury to buyer
-    const secret = Uint8Array.from(JSON.parse(TREASURY_PRIVATE_KEY));
-    const treasuryKeypair = Keypair.fromSecretKey(secret);
+    // Setup treasury keypair
+    const treasurySecret = Uint8Array.from(JSON.parse(TREASURY_PRIVATE_KEY));
+    const treasuryKeypair = Keypair.fromSecretKey(treasurySecret);
+    const treasuryPubkey = treasuryKeypair.publicKey;
 
-    const connection2 = connection;
-    const mintPubkey = new PublicKey(TOKEN_MINT_ADDRESS);
-    const buyerPubkey = new PublicKey(buyer);
+    const userATA = await getAssociatedTokenAddress(mintPubkey, buyerPubkey, false);
+    const treasuryATA = await getAssociatedTokenAddress(mintPubkey, treasuryPubkey, false);
 
-    // Ensure treasury associated token account (source) exists
-    const treasuryATA = await getOrCreateAssociatedTokenAccount(connection2, treasuryKeypair, mintPubkey, treasuryKeypair.publicKey);
-    const buyerATA = await getOrCreateAssociatedTokenAccount(connection2, treasuryKeypair, mintPubkey, buyerPubkey);
+    // Prevent double transfer
+    let userHasTokens = false;
+    try {
+      const account = await getAccount(connection, userATA);
+      if (account.amount > 0n) userHasTokens = true;
+    } catch {
+      // ATA doesn't exist yet, continue
+    }
+    if (userHasTokens) {
+      return { statusCode: 400, body: JSON.stringify({ error: "ALREADY_HAS_TOKENS", message: "Buyer already holds tokens" }) };
+    }
 
-    // compute raw token amount respecting decimals
-    // use BigInt for safety
-    const amountRaw = BigInt(tokenAmount) * (BigInt(10) ** BigInt(TOKEN_DECIMALS));
-    // Transfer instruction expects a number in many versions; convert safely:
-    const amountNumber = Number(amountRaw); // expect amounts to be reasonably sized
+    // Ensure treasury has enough tokens
+    try {
+      const treasuryAcc = await getAccount(connection, treasuryATA);
+      if (treasuryAcc.amount < BigInt(tokenAmount) * 10n ** BigInt(TOKEN_DECIMALS)) {
+        return { statusCode: 500, body: JSON.stringify({ error: "INSUFFICIENT_TREASURY_BALANCE", message: "Treasury lacks tokens" }) };
+      }
+    } catch {
+      return { statusCode: 500, body: JSON.stringify({ error: "MISSING_TREASURY_ATA", message: "Treasury ATA not found" }) };
+    }
 
-    const transferIx = createTransferInstruction(
-      treasuryATA.address,
-      buyerATA.address,
-      treasuryKeypair.publicKey,
-      amountNumber,
-      [],
-      TOKEN_PROGRAM_ID
-    );
+    // Build transaction
+    const tx = new Transaction();
+    tx.feePayer = buyerPubkey;
 
-    const tx = new Transaction().add(transferIx);
-    tx.feePayer = treasuryKeypair.publicKey;
-    tx.recentBlockhash = (await connection2.getRecentBlockhash()).blockhash;
-    tx.sign(treasuryKeypair);
+    // Add ATA creation if needed
+    let needCreate = false;
+    try {
+      await getAccount(connection, userATA);
+    } catch {
+      needCreate = true;
+    }
+    if (needCreate) {
+      tx.add(
+        createAssociatedTokenAccountInstruction(buyerPubkey, userATA, buyerPubkey, mintPubkey)
+      );
+    }
 
-    const raw = tx.serialize();
-    const txSig2 = await connection2.sendRawTransaction(raw);
-    await connection2.confirmTransaction(txSig2, 'confirmed');
+    // Add token transfer
+    const amountRaw = BigInt(tokenAmount) * (10n ** BigInt(TOKEN_DECIMALS));
+    tx.add(createTransferInstruction(treasuryATA, userATA, treasuryPubkey, amountRaw));
 
-    return {
-      statusCode: 200,
-      body: JSON.stringify({ signature: txSig2 })
-    };
+    // Recent blockhash & partial sign
+    tx.recentBlockhash = (await connection.getLatestBlockhash("finalized")).blockhash;
+    tx.partialSign(treasuryKeypair);
+
+    // Serialize and return
+    const serialized = tx.serialize({ requireAllSignatures: false }).toString("base64");
+
+    return { statusCode: 200, body: JSON.stringify({ tx: serialized }) };
   } catch (err) {
     console.error(err);
     return { statusCode: 500, body: JSON.stringify({ error: err.message || String(err) }) };
