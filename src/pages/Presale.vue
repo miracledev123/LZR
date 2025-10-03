@@ -136,11 +136,18 @@ async function checkBalance() {
   try {
     const lamports = await connection.getBalance(new PublicKey(walletPubKey.value));
     walletBalanceSOL.value = lamports / LAMPORTS_PER_SOL;
+
+    if (walletBalanceSOL.value < requiredSOL.value) {
+      message.value = `Insufficient SOL. Need ${requiredSOL.value} SOL but have ${walletBalanceSOL.value} SOL.`;
+    } else {
+      message.value = ""; // no message if balance is enough
+    }
   } catch (e) {
     console.error(e);
     message.value = "Failed to fetch wallet balance.";
   }
 }
+
 
 // New presale buy function using partially-signed tx
 async function buy() {
