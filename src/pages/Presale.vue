@@ -27,7 +27,12 @@
         class="px-4 py-2 bg-indigo-600 text-white rounded disabled:opacity-50"
         :disabled="isConnecting"
       >
-        {{ walletPubKey ? 'Connected: ' + shortPubkey(walletPubKey) : (isConnecting ? 'Connecting...' : 'Connect Wallet') }}
+        <span v-if="walletPubKey">
+          {{ shortPubkey(walletPubKey) }}
+        </span>
+        <span v-else>
+          {{ isConnecting ? 'Connecting...' : 'Connect Wallet' }}
+        </span>
       </button>
 
       <button
@@ -47,6 +52,7 @@
     </div>
   </div>
 </template>
+
 
 <script setup>
 import { ref, computed, onMounted } from "vue";
