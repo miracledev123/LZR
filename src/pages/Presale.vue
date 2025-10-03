@@ -15,18 +15,31 @@
       <div>Token price (USD): <strong>{{ TOKEN_PRICE_USD }}</strong></div>
       <div>USD total: <strong>${{ formatNumber(usdTotal, 6) }}</strong></div>
       <div>
-        SOL price: <strong v-if="solPrice !== null">${{ formatNumber(solPrice, 6) }}</strong>
+        SOL price:
+        <strong v-if="solPrice !== null">${{ formatNumber(solPrice, 6) }}</strong>
         <span v-else>loading...</span>
       </div>
-      <div v-if="solPrice !== null">Estimated SOL required: <strong>{{ formatNumber(requiredSOL, 6) }} SOL</strong></div>
+      <div v-if="solPrice !== null">
+        Estimated SOL required:
+        <strong>{{ formatNumber(requiredSOL, 6) }} SOL</strong>
+      </div>
     </div>
 
     <div class="flex gap-2 mb-3">
       <button
         @click="connectWallet"
-        class="px-4 py-2 bg-indigo-600 text-white rounded disabled:opacity-50"
+        class="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded disabled:opacity-50"
         :disabled="isConnecting"
       >
+        <!-- Solana icon -->
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 397 311" fill="currentColor">
+          <linearGradient id="solana-gradient" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#00FFA3"/>
+            <stop offset="100%" stop-color="#DC1FFF"/>
+          </linearGradient>
+          <path fill="url(#solana-gradient)" d="M64 236a9 9 0 0 1 6-3h324a6 6 0 0 1 4 10l-63 68a9 9 0 0 1-6 3H5a6 6 0 0 1-4-10l63-68Zm0-99a9 9 0 0 1 6-3h324a6 6 0 0 0 4-10l-63-68a9 9 0 0 0-6-3H5a6 6 0 0 0-4 10l63 68Zm0-99a9 9 0 0 1 6-3h324a6 6 0 0 0 4-10L335 3a9 9 0 0 0-6-3H5a6 6 0 0 0-4 10l63 68Z"/>
+        </svg>
+
         <span v-if="walletPubKey">
           Disconnect ({{ shortPubkey(walletPubKey) }})
         </span>
@@ -46,9 +59,18 @@
     </div>
 
     <div class="text-sm text-gray-700">
-      <div v-if="message" class="p-2 bg-yellow-50 border-l-4 border-yellow-300 rounded">{{ message }}</div>
-      <div v-if="walletBalanceSOL !== null" class="mt-2">Wallet SOL balance: <strong>{{ formatNumber(walletBalanceSOL,6) }} SOL</strong></div>
-      <div v-if="txSignature" class="mt-2">Last SOL tx: <code class="break-all">{{ txSignature }}</code></div>
+      <div
+        v-if="message"
+        class="p-2 bg-yellow-50 border-l-4 border-yellow-300 rounded"
+      >
+        {{ message }}
+      </div>
+      <div v-if="walletBalanceSOL !== null" class="mt-2">
+        Wallet SOL balance: <strong>{{ formatNumber(walletBalanceSOL, 6) }} SOL</strong>
+      </div>
+      <div v-if="txSignature" class="mt-2">
+        Last SOL tx: <code class="break-all">{{ txSignature }}</code>
+      </div>
     </div>
   </div>
 </template>
@@ -222,6 +244,7 @@ async function buy() {
   }
 }
 </script>
+
 
 <style scoped>
 /* small local styles if needed */
